@@ -1,0 +1,3 @@
+backend/env/
+backend/saved_model/
+frontend/public/*.wav
