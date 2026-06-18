@@ -4,51 +4,57 @@ import math
 import os
 import random
 import numpy as np
-import websockets
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 
+# Disable extra runtime tracking print statements from TensorFlow
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 import tensorflow as tf
 from tensorflow.keras.models import load_model # type: ignore
 
+app = FastAPI()
+
+# --- 📂 HYBRID PATH ANCHORING ENGINE ---
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+FRONTEND_DIST_DIR = os.path.join(os.path.dirname(BASE_DIR), "frontend", "dist")
+
+# Smart Fallback Tracker: Checks if 'saved_model' exists; if not, reads from backend root
+PRIMARY_MODEL_DIR = os.path.join(BASE_DIR, "saved_model")
+if os.path.exists(os.path.join(PRIMARY_MODEL_DIR, "ensemble_anchors.npz")):
+    SAVED_MODEL_DIR = PRIMARY_MODEL_DIR
+    print("📂 Rooted target folder located at: backend/saved_model/")
+else:
+    SAVED_MODEL_DIR = BASE_DIR
+    print("📂 Subfolder missing; fallback engaged to: backend/ root directory")
+
+# --- 🚀 TELEMETRY SIMULATION SIMULATOR CONTROL CORE ---
 TARGETS = {
-    "oxygen": 21.04,
-    "pressure": 101.32,
-    "temperature": 22.15,
-    "vibration": 0.021,
-    "solar_flux": 453.0
+    "oxygen": 21.04, "pressure": 101.32, "temperature": 22.15, "vibration": 0.021, "solar_flux": 453.0
 }
-
 active_anomalies = {
-    "o2_rise": False, "o2_fall": False,
-    "press_rise": False, "press_fall": False,
-    "temp_rise": False, "temp_fall": False,
-    "vibration": False, "solar": False
+    "o2_rise": False, "o2_fall": False, "press_rise": False, "press_fall": False,
+    "temp_rise": False, "temp_fall": False, "vibration": False, "solar": False
 }
-
 system_metrics = {
     "oxygen": 21.04, "pressure": 101.32, "temperature": 22.15, "vibration": 0.021, "solar_flux": 453.0,
     "transformer_loss": 0.0, "accumulated_damage": 0.0
 }
 
 WINDOW_SIZE = 30
-atmos_buffer = []
-ext_buffer = []
+atmos_buffer, ext_buffer = [], []
 
-print("🧠 Loading Trained Twin-Brain Transformer Models from Memory...")
-anchors = np.load("saved_model/ensemble_anchors.npz")
+print("🧠 Loading Trained Twin-Brain Transformer Models via Absolute Anchoring...")
+anchors = np.load(os.path.join(SAVED_MODEL_DIR, "ensemble_anchors.npz"))
 atmos_min, atmos_max = anchors["atmos_min"], anchors["atmos_max"]
 ext_min, ext_max     = anchors["ext_min"], anchors["ext_max"]
 
-atmos_brain = load_model("saved_model/atmos_brain.keras")
-ext_brain   = load_model("saved_model/ext_brain.keras")
-print("✅ Neural architectures verified and fully operational.")
+atmos_brain = load_model(os.path.join(SAVED_MODEL_DIR, "atmos_brain.keras"))
+ext_brain   = load_model(os.path.join(SAVED_MODEL_DIR, "ext_brain.keras"))
+print("✅ Neural architectures verified and operational.")
 
 def evaluate_ensemble_intelligence():
-    """
-    Slices inputs and checks deviations against the trained static model signatures.
-    """
     global atmos_buffer, ext_buffer
-
     raw_atmos = np.array([system_metrics["oxygen"], system_metrics["pressure"], system_metrics["temperature"]])
     scaled_atmos = (raw_atmos - atmos_min) / (atmos_max - atmos_min)
 
@@ -92,12 +98,10 @@ def advance_physics_frame():
     elif active_anomalies["temp_fall"]: system_metrics["temperature"] = max(8.0, system_metrics["temperature"] - 0.022)
     else: system_metrics["temperature"] += (TARGETS["temperature"] - system_metrics["temperature"]) * 0.03
 
-    # FIXED: Vibration spike now drops down smoothly via damping factor instead of resetting instantly
     if active_anomalies["vibration"]:
         system_metrics["vibration"] = 0.22
         active_anomalies["vibration"] = False 
     else: 
-        # Smoothly damp back down toward baseline target noise levels
         vibe_deviation = system_metrics["vibration"] - TARGETS["vibration"]
         system_metrics["vibration"] = TARGETS["vibration"] + (vibe_deviation * 0.85)
 
@@ -112,33 +116,34 @@ def advance_physics_frame():
     system_metrics["temperature"] += random.uniform(-0.003, 0.003)
     system_metrics["vibration"] += random.uniform(-0.0005, 0.0005)
 
-    # TUNED: Set step sizes lower to produce a gradual, heavy degradation and recovery curve
     if system_metrics["transformer_loss"] > 0.0:
         system_metrics["accumulated_damage"] = min(0.45, system_metrics["accumulated_damage"] + 0.001)
     else:
         system_metrics["accumulated_damage"] = max(0.0, system_metrics["accumulated_damage"] - 0.0006)
 
-async def handler(websocket):
+# --- 📡 FASTAPI WEB NETWORK EXPOSURE ROUTING ---
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    await websocket.accept()
+    print("🔌 Secure WebSocket Connection Opened.")
     try:
-        print("🔌 New dashboard client handshake complete.")
         while True:
-            while True:
-                try:
-                    message = await asyncio.get_event_loop().run_in_executor(None, lambda: None) # placeholder placeholder
-                    message = await asyncio.wait_for(websocket.recv(), timeout=0.005)
-                    data = json.loads(message)
-                    if "command" in data:
-                        cmd = data["command"]
-                        if cmd == "nominal":
-                            for key in active_anomalies: active_anomalies[key] = False
-                            atmos_buffer.clear()
-                            ext_buffer.clear()
-                        elif cmd in active_anomalies: active_anomalies[cmd] = True
-                        elif cmd.startswith("clear_"):
-                            target_key = cmd.replace("clear_", "")
-                            if target_key in active_anomalies: active_anomalies[target_key] = False
-                except asyncio.TimeoutError:
-                    break
+            try:
+                data_msg = await asyncio.wait_for(websocket.receive_text(), timeout=0.01)
+                data = json.loads(data_msg)
+                if "command" in data:
+                    cmd = data["command"]
+                    if cmd == "nominal":
+                        for key in active_anomalies: active_anomalies[key] = False
+                        atmos_buffer.clear()
+                        ext_buffer.clear()
+                    elif cmd in active_anomalies: active_anomalies[cmd] = True
+                    elif cmd.startswith("clear_"):
+                        target_key = cmd.replace("clear_", "")
+                        if target_key in active_anomalies: active_anomalies[target_key] = False
+            except asyncio.TimeoutError:
+                pass
 
             advance_physics_frame()
             evaluate_ensemble_intelligence()
@@ -149,14 +154,21 @@ async def handler(websocket):
                 "solar_flux": int(system_metrics["solar_flux"]), "transformer_loss": float(system_metrics["transformer_loss"]),
                 "accumulated_damage": float(system_metrics["accumulated_damage"]), "active_matrix": active_anomalies
             }
-            await websocket.send(json.dumps(payload))
+            await websocket.send_text(json.dumps(payload))
             await asyncio.sleep(0.1)
-    except websockets.exceptions.ConnectionClosed: pass
+    except WebSocketDisconnect:
+        print("🔌 WebSocket Connection Terminated Cleanly.")
 
-async def main():
-    print("📡 Booting Production Ensemble Server on ws://localhost:8000")
-    async with websockets.serve(handler, "localhost", 8000):
-        await asyncio.get_running_loop().create_future()
+# Mount and serve compiled React files automatically from static index structures
+app.mount("/assets", StaticFiles(directory=os.path.join(FRONTEND_DIST_DIR, "assets")), name="assets")
+
+@app.get("/{catchall:path}")
+async def serve_react_frontend(catchall: str):
+    file_path = os.path.join(FRONTEND_DIST_DIR, catchall)
+    if catchall and os.path.exists(file_path):
+        return FileResponse(file_path)
+    return FileResponse(os.path.join(FRONTEND_DIST_DIR, "index.html"))
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=7860)
